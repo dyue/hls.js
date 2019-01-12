@@ -194,11 +194,11 @@ function loadSelectedStream() {
 
 
   // Extending both a demo-specific config and the user config which can override all
-  const hlsConfig = Object.assign({}, { debug: true }, getUserHlsConfig());
+  const hlsConfig = $.extend({}, { debug: true }, getUserHlsConfig());
 
   if (selectedTestStream && selectedTestStream.config) {
     console.info('[loadSelectedStream] extending hls config with stream-specific config: ', selectedTestStream.config);
-    Object.assign(hlsConfig, selectedTestStream.config)
+    $.extend(hlsConfig, selectedTestStream.config)
   }
 
   onDemoConfigChanged();
