@@ -740,6 +740,8 @@ class StreamController extends BaseStreamController {
   }
 
   onManifestParsed (data) {
+    let config = this.config;
+    let maxVideoWidth = config.maxVideoWidth || 0, maxVideoHeight = config.maxVideoHeight || 0;
     let aac = false, heaac = false, codec;
     data.levels.forEach(level => {
       // detect if we have different kind of audio codecs used amongst playlists
@@ -753,6 +755,8 @@ class StreamController extends BaseStreamController {
           heaac = true;
         }
       }
+      if (level.width > maxVideoWidth) maxVideoWidth = level.width;
+      if (level.height > maxVideoHeight) maxVideoHeight = level.height;
     });
     this.audioCodecSwitch = (aac && heaac);
     if (this.audioCodecSwitch) {
@@ -761,7 +765,10 @@ class StreamController extends BaseStreamController {
 
     this.levels = data.levels;
     this.startFragRequested = false;
-    let config = this.config;
+
+    if (maxVideoWidth) config.maxVideoWidth = maxVideoWidth;
+    if (maxVideoHeight) config.maxVideoHeight = maxVideoHeight;
+    
     if (config.autoStartLoad || this.forceStartLoad) {
       this.hls.startLoad(config.startPosition);
     }

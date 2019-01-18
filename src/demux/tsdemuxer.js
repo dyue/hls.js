@@ -706,8 +706,8 @@ class TSDemuxer {
         if (!track.sps) {
           expGolombDecoder = new ExpGolomb(unit.data);
           let config = expGolombDecoder.readSPS();
-          track.width = config.width;
-          track.height = config.height;
+          track.width = this.config.maxVideoWidth || config.width;
+          track.height = this.config.maxVideoHeight || config.height;
           track.pixelRatio = config.pixelRatio;
           track.sps = [unit.data];
           track.duration = this._duration;
