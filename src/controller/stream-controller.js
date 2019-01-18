@@ -768,7 +768,7 @@ class StreamController extends BaseStreamController {
 
     if (maxVideoWidth) config.maxVideoWidth = maxVideoWidth;
     if (maxVideoHeight) config.maxVideoHeight = maxVideoHeight;
-    
+
     if (config.autoStartLoad || this.forceStartLoad) {
       this.hls.startLoad(config.startPosition);
     }
