@@ -10,6 +10,7 @@ import { getMediaSource } from '../utils/mediasource-helper';
 
 import { TrackSet } from '../types/track';
 import { Segment } from '../types/segment';
+import { BufferControllerConfig } from '../config';
 
 // Add extension properties to SourceBuffers from the DOM API.
 type ExtendedSourceBuffer = SourceBuffer & {
@@ -46,11 +47,16 @@ class BufferController extends EventHandler {
   // signals that mediaSource should have endOfStream called
   private _needsEos: boolean = false;
 
+  private config: BufferControllerConfig;
+
   // this is optional because this property is removed from the class sometimes
   public audioTimestampOffset?: number;
 
   // The number of BUFFER_CODEC events received before any sourceBuffers are created
   public bufferCodecEventsExpected: number = 0;
+
+  // The total number of BUFFER_CODEC events received
+  private _bufferCodecEventsTotal: number = 0;
 
   // A reference to the attached media element
   public media: HTMLMediaElement | null = null;
@@ -88,6 +94,8 @@ class BufferController extends EventHandler {
       Events.BUFFER_FLUSHING,
       Events.LEVEL_PTS_UPDATED,
       Events.LEVEL_UPDATED);
+
+    this.config = hls.config;
   }
 
   destroy () {
@@ -138,13 +146,13 @@ class BufferController extends EventHandler {
     // sourcebuffers will be created all at once when the expected nb of tracks will be reached
     // in case alt audio is not used, only one BUFFER_CODEC event will be fired from main stream controller
     // it will contain the expected nb of source buffers, no need to compute it
-    this.bufferCodecEventsExpected = data.altAudio ? 2 : 1;
+    this.bufferCodecEventsExpected = this._bufferCodecEventsTotal = data.altAudio ? 2 : 1;
     logger.log(`${this.bufferCodecEventsExpected} bufferCodec event(s) expected`);
   }
 
   onMediaAttaching (data: { media: HTMLMediaElement }) {
     let media = this.media = data.media;
-    if (media) {
+    if (media && MediaSource) {
       // setup the media source
       let ms = this.mediaSource = new MediaSource();
       // Media Source listeners
@@ -197,6 +205,7 @@ class BufferController extends EventHandler {
       this.mediaSource = null;
       this.media = null;
       this._objectUrl = null;
+      this.bufferCodecEventsExpected = this._bufferCodecEventsTotal;
       this.pendingTracks = {};
       this.tracks = {};
       this.sourceBuffer = {};
@@ -362,6 +371,7 @@ class BufferController extends EventHandler {
           this.tracks[trackName] = {
             buffer: sb,
             codec: codec,
+            id: track.id,
             container: track.container,
             levelCodec: track.levelCodec
           };
@@ -434,25 +444,32 @@ class BufferController extends EventHandler {
     this._needsEos = false;
   }
 
-  onBufferFlushing (data: { startOffset: number, endOffset: number, type: SourceBufferName }) {
-    this.flushRange.push({ start: data.startOffset, end: data.endOffset, type: data.type });
+  onBufferFlushing (data: { startOffset: number, endOffset: number, type?: SourceBufferName }) {
+    if (data.type) {
+      this.flushRange.push({ start: data.startOffset, end: data.endOffset, type: data.type });
+    } else {
+      this.flushRange.push({ start: data.startOffset, end: data.endOffset, type: 'video' });
+      this.flushRange.push({ start: data.startOffset, end: data.endOffset, type: 'audio' });
+    }
+
     // attempt flush immediately
     this.flushBufferCounter = 0;
     this.doFlush();
   }
 
   flushLiveBackBuffer () {
-    if (!this.media) {
-      throw Error('flushLiveBackBuffer called without attaching media');
-    }
-
     // clear back buffer for live only
     if (!this._live) {
       return;
     }
 
-    const liveBackBufferLength = this.hls.config.liveBackBufferLength;
+    const liveBackBufferLength = this.config.liveBackBufferLength;
     if (!isFinite(liveBackBufferLength) || liveBackBufferLength < 0) {
+      return;
+    }
+
+    if (!this.media) {
+      logger.error('flushLiveBackBuffer called without attaching media');
       return;
     }
 
@@ -471,7 +488,9 @@ class BufferController extends EventHandler {
           // remove buffer up until current time minus minimum back buffer length (removing buffer too close to current
           // time will lead to playback freezing)
           // credits for level target duration - https://github.com/videojs/http-streaming/blob/3132933b6aa99ddefab29c10447624efd6fd6e52/src/segment-loader.js#L91
-          this.removeBufferRange(bufferType, sb, 0, targetBackBufferPosition);
+          if (this.removeBufferRange(bufferType, sb, 0, targetBackBufferPosition)) {
+            this.hls.trigger(Events.LIVE_BACK_BUFFER_REACHED, { bufferEnd: targetBackBufferPosition });
+          }
         }
       }
     }
@@ -492,7 +511,7 @@ class BufferController extends EventHandler {
    * More details: https://github.com/video-dev/hls.js/issues/355
    */
   updateMediaElementDuration () {
-    let { config } = this.hls;
+    let { config } = this;
     let duration: number;
 
     if (this._levelDuration === null ||
@@ -572,7 +591,7 @@ class BufferController extends EventHandler {
   }
 
   doAppending () {
-    let { hls, segments, sourceBuffer, media } = this;
+    let { config, hls, segments, sourceBuffer } = this;
     if (!Object.keys(sourceBuffer).length) {
       // early exit if no source buffers have been initialized yet
       return;
@@ -634,8 +653,8 @@ class BufferController extends EventHandler {
         /* with UHD content, we could get loop of quota exceeded error until
           browser is able to evict some data from sourcebuffer. retrying help recovering this
         */
-        if (this.appendError > hls.config.appendErrorMaxRetry) {
-          logger.log(`fail ${hls.config.appendErrorMaxRetry} times to append segment in sourceBuffer`);
+        if (this.appendError > config.appendErrorMaxRetry) {
+          logger.log(`fail ${config.appendErrorMaxRetry} times to append segment in sourceBuffer`);
           this.segments = [];
           event.fatal = true;
         }
