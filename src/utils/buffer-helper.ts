@@ -8,14 +8,23 @@
  * Also @see https://developer.mozilla.org/en-US/docs/Web/API/HTMLMediaElement/buffered
 */
 
+type BufferTimeRange = {
+  start: number
+  end: number
+};
+
+type Bufferable = {
+  buffered: TimeRanges
+};
+
 export class BufferHelper {
   /**
    * Return true if `media`'s buffered include `position`
-   * @param {HTMLMediaElement|SourceBuffer} media
+   * @param {Bufferable} media
    * @param {number} position
    * @returns {boolean}
    */
-  static isBuffered (media, position) {
+  static isBuffered (media: Bufferable, position: number): boolean {
     try {
       if (media) {
         let buffered = media.buffered;
@@ -33,10 +42,21 @@ export class BufferHelper {
     return false;
   }
 
-  static bufferInfo (media, pos, maxHoleDuration) {
+  static bufferInfo (
+    media: Bufferable,
+    pos: number,
+    maxHoleDuration: number
+  ): {
+    len: number,
+    start: number,
+    end: number,
+    nextStart?: number,
+  } {
     try {
       if (media) {
-        let vbuffered = media.buffered, buffered = [], i;
+        let vbuffered = media.buffered;
+        let buffered: BufferTimeRange[] = [];
+        let i: number;
         for (i = 0; i < vbuffered.length; i++) {
           buffered.push({ start: vbuffered.start(i), end: vbuffered.end(i) });
         }
@@ -51,10 +71,16 @@ export class BufferHelper {
     return { len: 0, start: pos, end: pos, nextStart: undefined };
   }
 
-  static bufferedInfo (buffered, pos, maxHoleDuration) {
-    let buffered2 = [],
-      // bufferStart and bufferEnd are buffer boundaries around current video position
-      bufferLen, bufferStart, bufferEnd, bufferStartNext, i;
+  static bufferedInfo (
+    buffered: BufferTimeRange[],
+    pos: number,
+    maxHoleDuration: number
+  ): {
+    len: number,
+    start: number,
+    end: number,
+    nextStart?: number,
+  } {
     // sort on buffer.start/smaller end (IE does not always return sorted buffered range)
     buffered.sort(function (a, b) {
       let diff = a.start - b.start;
@@ -64,32 +90,47 @@ export class BufferHelper {
         return b.end - a.end;
       }
     });
-    // there might be some small holes between buffer time range
-    // consider that holes smaller than maxHoleDuration are irrelevant and build another
-    // buffer time range representations that discards those holes
-    for (i = 0; i < buffered.length; i++) {
-      let buf2len = buffered2.length;
-      if (buf2len) {
-        let buf2end = buffered2[buf2len - 1].end;
-        // if small hole (value between 0 or maxHoleDuration ) or overlapping (negative)
-        if ((buffered[i].start - buf2end) < maxHoleDuration) {
-          // merge overlapping time ranges
-          // update lastRange.end only if smaller than item.end
-          // e.g.  [ 1, 15] with  [ 2,8] => [ 1,15] (no need to modify lastRange.end)
-          // whereas [ 1, 8] with  [ 2,15] => [ 1,15] ( lastRange should switch from [1,8] to [1,15])
-          if (buffered[i].end > buf2end) {
-            buffered2[buf2len - 1].end = buffered[i].end;
+
+    let buffered2: BufferTimeRange[] = [];
+    if (maxHoleDuration) {
+      // there might be some small holes between buffer time range
+      // consider that holes smaller than maxHoleDuration are irrelevant and build another
+      // buffer time range representations that discards those holes
+      for (let i = 0; i < buffered.length; i++) {
+        let buf2len = buffered2.length;
+        if (buf2len) {
+          let buf2end = buffered2[buf2len - 1].end;
+          // if small hole (value between 0 or maxHoleDuration ) or overlapping (negative)
+          if ((buffered[i].start - buf2end) < maxHoleDuration) {
+            // merge overlapping time ranges
+            // update lastRange.end only if smaller than item.end
+            // e.g.  [ 1, 15] with  [ 2,8] => [ 1,15] (no need to modify lastRange.end)
+            // whereas [ 1, 8] with  [ 2,15] => [ 1,15] ( lastRange should switch from [1,8] to [1,15])
+            if (buffered[i].end > buf2end) {
+              buffered2[buf2len - 1].end = buffered[i].end;
+            }
+          } else {
+            // big hole
+            buffered2.push(buffered[i]);
           }
         } else {
-          // big hole
+          // first value
           buffered2.push(buffered[i]);
         }
-      } else {
-        // first value
-        buffered2.push(buffered[i]);
       }
+    } else {
+      buffered2 = buffered;
     }
-    for (i = 0, bufferLen = 0, bufferStart = bufferEnd = pos; i < buffered2.length; i++) {
+
+    let bufferLen = 0;
+
+    // bufferStartNext can possibly be undefined based on the conditional logic below
+    let bufferStartNext: number | undefined;
+
+    // bufferStart and bufferEnd are buffer boundaries around current video position
+    let bufferStart: number = pos;
+    let bufferEnd: number = pos;
+    for (let i = 0; i < buffered2.length; i++) {
       let start = buffered2[i].start,
         end = buffered2[i].end;
       // logger.log('buf start/end:' + buffered.start(i) + '/' + buffered.end(i));

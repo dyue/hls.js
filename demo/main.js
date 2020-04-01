@@ -18,7 +18,8 @@ if (demoConfig) {
 
 const hlsjsDefaults = {
   debug: true,
-  enableWorker: true
+  enableWorker: true,
+  liveBackBufferLength: 60 * 15
 };
 
 let enableStreaming = getDemoConfigPropOrDefault('enableStreaming', true);
@@ -1202,6 +1203,7 @@ function setupConfigEditor() {
   const elPersistence = document.querySelector('#configPersistence');
   elPersistence.addEventListener('change', onConfigPersistenceChanged);
   elPersistence.checked = shouldRestorePersisted;
+  configPersistenceEnabled = shouldRestorePersisted;
 
   updateConfigEditorValue(contents);
 }
